@@ -310,3 +310,4 @@ class TetrisGame:
             self.check_game_over()
         self.render(valid_actions=None)
         print("Final score:", self.score)
+        self.reset_board()
