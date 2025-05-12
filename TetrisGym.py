@@ -82,3 +82,6 @@ class TetrisGym:
 
 
         return next_state, reward, done, info
+    
+    def get_action_space_size(self):
+        return len(self.full_action_space)
