@@ -1,17 +1,24 @@
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
+import imageio.v2 as imageio
 
 from TetrisGame import TetrisGame
 
 
 class TetrisGym:
-    def __init__(self, width=10, height=20, max_steps=None, state_mode='flat', render_mode=False):
+    def __init__(self, width=10, height=20, max_steps=None, state_mode='flat', render_mode='skip'):
+        """
+        - state_mode: 'flat', 'tensor', 'features'
+        - render_mode: 'skip', 'render', 'capture'
+        """
         self.game = TetrisGame(width, height)
         self.max_steps = max_steps
         self.state_mode = state_mode
         self.render_mode = render_mode
         self.step_count = 0
         self.valid_actions = []  # cache valid_actions in each cycle
+        self.frames = []  # cache frames for capture mode
 
         # Precompute the full action space: (rotation_idx, x_position)
         self.full_action_space = self._build_action_space()
@@ -43,6 +50,7 @@ class TetrisGym:
         self.game.spawn_new_piece()  # Since TetrisGame.reset_board does not push the next Tetromino to current_piece
         self.valid_actions = self.game.get_valid_actions()  # get valid_actions list
         self.step_count = 0
+        self.frames = []
         state = self.get_state()
         return state
 
@@ -145,14 +153,38 @@ class TetrisGym:
         next_state = self.get_state()
 
         # Rendering
-        if self.render_mode:
+        if self.render_mode == 'render':
             self.render()
+        elif self.render_mode == 'capture':
+            self.capture()
 
         return next_state, reward, done, info
     
     def render(self):
-        """Renders the state of game. TODO: include action chosen by the RL"""
+        """Renders the state of game. """
         self.game.render(valid_actions=self.valid_actions)
+
+    def capture(self):
+        fig = self.game.render(valid_actions=self.valid_actions, return_fig=True)
+        self.frames.append(fig)
+        plt.close(fig)  # free memory
+
+    def save_gif(self, filename, fps=2):
+        """Save collected frames into a gif. Only works if render_mode='capture'"""
+        if not self.frames:
+            print("No frames to save. Set render_mode='capture'.")
+            return
+
+        images = []
+        for fig in self.frames:
+            fig.canvas.draw()
+            image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
+            image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            images.append(image)
+            plt.close(fig)  # free memory
+
+        imageio.mimsave(filename, images, fps=fps)
+        print(f"GIF saved to {filename}")
 
     def get_action_space_size(self):
         """Returns how many possible actions there are"""

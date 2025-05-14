@@ -205,11 +205,13 @@ class TetrisGame:
                         linewidth=1, edgecolor='black', facecolor='gray')
                     ax.add_patch(rect)
 
-    def render(self, valid_actions):
+    def render(self, valid_actions, return_fig=False):
         """
         Render the game using matplotlib:
         - Left: the main board
         - Right: current piece, next piece, score
+
+        TODO: include action chosen by the RL
         """
         # First clear the output in notebook, does nothing in non-notebook environment
         try:
@@ -264,7 +266,12 @@ class TetrisGame:
         ax_info.text(0, -8, f"Score: {self.score}", fontsize=12)
 
         plt.tight_layout()
-        plt.show()
+
+        if return_fig:
+            return fig
+        else:
+            plt.show()
+            plt.close(fig)
 
 
     def player_input(self, valid_actions):
