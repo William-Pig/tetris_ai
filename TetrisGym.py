@@ -69,15 +69,17 @@ class TetrisGym:
         channels.append(board.astype(np.float32))
 
         # C1-7: current piece one‑hots, maintain board dimension (full 1s or 0s) for CNN-friendliness
+        current_idx = piece_to_idx[curr_piece]
         for piece_idx in range(7):
             channels.append(
-                np.full((h, w), 1.0 if piece_to_idx[curr_piece]==piece_idx else 0.0, dtype=np.float32)
+                np.full((h, w), 1.0 if piece_idx==current_idx else 0.0, dtype=np.float32)
                 )
 
         # C8-14: next piece one‑hots
+        next_idx = piece_to_idx[next_piece]
         for piece_idx in range(7):
             channels.append(
-                np.full((h, w), 1.0 if piece_to_idx[next_piece]==piece_idx else 0.0, dtype=np.float32)
+                np.full((h, w), 1.0 if piece_idx==next_idx else 0.0, dtype=np.float32)
                 )
 
         return torch.from_numpy(np.stack(channels, axis=0))
@@ -127,7 +129,7 @@ class TetrisGym:
         self.step_count += 1
         reward = info["reward"]
 
-        # check if training is done: when game is over or exceeds max trainign steps
+        # check if training is done: when game is over or exceeds max training steps
         self.game.check_game_over()
         done = self.game.game_over or (self.max_steps is not None and self.step_count >= self.max_steps)
 
