@@ -1,10 +1,14 @@
+import torch
+import numpy as np
+
 from TetrisGame import TetrisGame
 
 
 class TetrisGym:
-    def __init__(self, width=10, height=20, max_steps=None, render_mode=False):
+    def __init__(self, width=10, height=20, max_steps=None, state_mode='flat', render_mode=False):
         self.game = TetrisGame(width, height)
         self.max_steps = max_steps
+        self.state_mode = state_mode
         self.render_mode = render_mode
         self.step_count = 0
         self.valid_actions = []  # cache valid_actions in each cycle
@@ -43,11 +47,70 @@ class TetrisGym:
         return state
 
     def get_state(self):
-        """Returns a flattened board, current and next piece info. TODO: to be improved, replace with full tensor"""
-        board_flat = self.game.board.flatten()  # Will be an array
+        """Returns the state of the game, depending on the state mode"""
+        board = self.game.board
         curr_piece = self.game.current_piece[0]  # just the type for now
         next_piece = self.game.next_piece[0]
-        return (board_flat, curr_piece, next_piece)  # Replace with full tensor later
+
+        if self.state_mode=='tensor':
+            return self._extract_tensor(board, curr_piece, next_piece)
+        elif self.state_mode=='flat':
+            return self._extract_tensor_flat(board, curr_piece, next_piece)
+        elif self.state_mode=='features':
+            return self._extract_features(board, curr_piece, next_piece)
+
+    def _extract_tensor(self, board, curr_piece, next_piece):
+        """Returns the state as a tensor with the actual 2D tetris board"""
+        h, w = board.shape
+        channels = []
+        piece_to_idx = {'I':0,'J':1,'L':2,'O':3,'S':4,'Z':5,'T':6}  # a lookup table to one-hot encode
+
+        # C0: the board
+        channels.append(board.astype(np.float32))
+
+        # C1-7: current piece one‑hots, maintain board dimension (full 1s or 0s) for CNN-friendliness
+        for piece_idx in range(7):
+            channels.append(
+                np.full((h, w), 1.0 if piece_to_idx[curr_piece]==piece_idx else 0.0, dtype=np.float32)
+                )
+
+        # C8-14: next piece one‑hots
+        for piece_idx in range(7):
+            channels.append(
+                np.full((h, w), 1.0 if piece_to_idx[next_piece]==piece_idx else 0.0, dtype=np.float32)
+                )
+
+        return torch.from_numpy(np.stack(channels, axis=0))
+
+
+    def _extract_tensor_flat(self, board, curr_piece, next_piece):
+        """Returns the state as a tensor with a flatten tetris board"""
+        v_board = board.flatten().astype(np.float32)  # (board width*height,)
+        piece_to_idx = {'I':0,'J':1,'L':2,'O':3,'S':4,'Z':5,'T':6}  # a lookup table to one-hot encode
+        v_curr  = self._one_hot(piece_to_idx[curr_piece])  # (7,)
+        v_next  = self._one_hot(piece_to_idx[next_piece])  # (7,)
+        return torch.from_numpy(np.concatenate([v_board, v_curr, v_next]))  # (...,)
+    
+    def _one_hot(self, idx, size=7):
+        """Creates a one-hot vector for the Tetromino shapes"""
+        v = np.zeros(size, dtype=np.float32)
+        v[idx] = 1.0
+        return v
+
+    def _extract_features(self, board, curr_piece, next_piece):
+        """
+        TODO: brainstorm features
+        - Number of lines cleared
+        - Number of holes
+        - Bumpiness (sum of the difference between heights of adjacent pairs of columns)
+        - Total Height
+        - Max height
+        - Min height
+        - Max bumpiness
+        - Next piece
+        - Current piece
+        """
+        pass
 
     def get_valid_action_ids(self):
         return [self.action_to_id[a] for a in self.valid_actions]
@@ -73,15 +136,19 @@ class TetrisGym:
             self.game.spawn_new_piece()
             self.valid_actions = self.game.get_valid_actions()
         else:
-            self.valid_actions = []
+            self.valid_actions = []  # empty possible actions
         next_state = self.get_state()
 
-        # Rendering, TODO: also include which action is chosen by the RL agent
+        # Rendering
         if self.render_mode:
-            self.game.render(valid_actions=self.valid_actions)
-
+            self.render()
 
         return next_state, reward, done, info
     
+    def render(self):
+        """Renders the state of game. TODO: include action chosen by the RL"""
+        self.game.render(valid_actions=self.valid_actions)
+
     def get_action_space_size(self):
+        """Returns how many possible actions there are"""
         return len(self.full_action_space)
