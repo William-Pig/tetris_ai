@@ -137,6 +137,9 @@ class TetrisGym:
         if not done:
             self.game.spawn_new_piece()
             self.valid_actions = self.game.get_valid_actions()
+            if not self.valid_actions:  # If no valid action, the game ends.
+                self.game.game_over = True
+                done = True
         else:
             self.valid_actions = []  # empty possible actions
         next_state = self.get_state()
