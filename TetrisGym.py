@@ -44,6 +44,8 @@ class TetrisGym:
                         actions.append(key)
         return actions
 
+
+
     def reset(self):
         """Resets the gym environment for a new episode (learning round)"""
         self.game.reset_board()
@@ -53,6 +55,8 @@ class TetrisGym:
         self.frames = []
         state = self.get_state()
         return state
+
+
 
     def get_state(self):
         """Returns the state of the game, depending on the state mode"""
@@ -92,7 +96,6 @@ class TetrisGym:
 
         return torch.from_numpy(np.stack(channels, axis=0))
 
-
     def _extract_tensor_flat(self, board, curr_piece, next_piece):
         """Returns the state as a tensor with a flatten tetris board"""
         v_board = board.flatten().astype(np.float32)  # (board width*height,)
@@ -122,11 +125,15 @@ class TetrisGym:
         """
         pass
 
+
+
     def get_valid_action_ids(self):
         return [self.action_to_id[a] for a in self.valid_actions]
 
     def action_id_to_tuple(self, action_id):
         return self.id_to_action[action_id]
+
+
 
     def step(self, action_id):
         if self.game.game_over:
@@ -154,18 +161,30 @@ class TetrisGym:
 
         # Rendering
         if self.render_mode == 'render':
-            self.render()
+            self.render(info)
         elif self.render_mode == 'capture':
-            self.capture()
+            self.capture(info)
 
         return next_state, reward, done, info
-    
-    def render(self):
-        """Renders the state of game. """
-        self.game.render(valid_actions=self.valid_actions)
 
-    def capture(self):
-        fig = self.game.render(valid_actions=self.valid_actions, return_fig=True)
+
+
+    def render(self, info=None):
+        """Renders the state of game. """
+        placement_mask = info.get("placement_mask") if info else None
+        pre_clear_board = info.get("pre_clear_board") if info else None
+        self.game.render(valid_actions=self.valid_actions,
+                        placement_mask=placement_mask,
+                        pre_clear_board=pre_clear_board)
+
+
+    def capture(self, info=None):
+        placement_mask = info.get("placement_mask") if info else None
+        pre_clear_board = info.get("pre_clear_board") if info else None
+        fig = self.game.render(valid_actions=self.valid_actions,
+                            placement_mask=placement_mask,
+                            pre_clear_board=pre_clear_board,
+                            return_fig=True)
         self.frames.append(fig)
         plt.close(fig)  # free memory
 
@@ -185,6 +204,8 @@ class TetrisGym:
 
         imageio.mimsave(filename, images, fps=fps)
         print(f"GIF saved to {filename}")
+
+
 
     def get_action_space_size(self):
         """Returns how many possible actions there are"""

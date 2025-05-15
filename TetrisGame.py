@@ -81,6 +81,7 @@ class TetrisGame:
         self.board = np.zeros((self.height, self.width), dtype=int)
         self.score = 0
         self.game_over = False
+        self.last_action = ''
         self.current_piece = None  # next_piece will push forward by spawn_new_piece
         self.next_piece = self._random_tetromino()
 
@@ -173,8 +174,15 @@ class TetrisGame:
         y = self._find_drop_height(piece, x)
         if y is None or not self._valid_position(piece, (y, x)):  # additional guard to check y validity
             raise ValueError(f"Invalid move attempted: rotation={rot_idx}, x={x}")
+        
+        # binary mask for new piece, used for visualization
+        placement_mask = np.zeros_like(self.board)
+        h, w = piece.shape
+        placement_mask[y:y+h, x:x+w] = piece  
 
+        pre_clear_board = self.board.copy()
         self._lock_piece(piece, (y, x))
+        self.last_action = f'({rot_idx}, {x})'
         lines_cleared = self._clear_lines()
 
         # Computes reward, TODO: later override _compute_reward() with heuristics (e.g., bumpiness, holes).
@@ -187,7 +195,9 @@ class TetrisGame:
             "x": x,
             "y": y,
             "lines_cleared": lines_cleared,
-            "reward": reward
+            "reward": reward,
+            "pre_clear_board": pre_clear_board,
+            "placement_mask": placement_mask
         }
         return output_info
 
@@ -205,7 +215,7 @@ class TetrisGame:
                         linewidth=1, edgecolor='black', facecolor='gray')
                     ax.add_patch(rect)
 
-    def render(self, valid_actions, return_fig=False):
+    def render(self, valid_actions, placement_mask=None, pre_clear_board=None, return_fig=False):
         """
         Render the game using matplotlib:
         - Left: the main board
@@ -232,7 +242,16 @@ class TetrisGame:
         # --- Left: Board ---
         ax_board = fig.add_subplot(gs[0, 0])
         ax_board.set_title("Tetris Board")
-        ax_board.imshow(self.board, cmap='Greys', origin='upper')
+        board_to_show = pre_clear_board if pre_clear_board is not None else self.board
+        ax_board.imshow(board_to_show, cmap='Greys', origin='upper')
+
+        if placement_mask is not None:
+            y_coords, x_coords = np.where(placement_mask)
+            for y, x in zip(y_coords, x_coords):
+                rect = patches.Rectangle((x - 0.5, y - 0.5), 1, 1,
+                                        linewidth=2, edgecolor='red', facecolor='none', linestyle='--')
+                ax_board.add_patch(rect)
+
 
         # TODO: Draw grid lines, causes minor mis-alignment
         # for x in range(self.width + 1):
@@ -257,13 +276,14 @@ class TetrisGame:
 
         # Show pieces
         self._draw_piece(ax_info, piece, "Current Piece", offset_y=5)
-        self._draw_piece(ax_info, next_piece, "Next Piece", offset_y=-4)
+        self._draw_piece(ax_info, next_piece, "Next Piece", offset_y=-5)
         # Show action
-        ax_info.text(0, 1, "Valid Actions:", fontsize=12)
+        ax_info.text(0, 1, "Last Action: " + self.last_action, fontsize=12)
+        ax_info.text(0, 0, "Valid Actions:", fontsize=12)
         actions_text = ', '.join(f"({r},{x})" for r, x in valid_actions) if valid_actions else ''
-        ax_info.text(0, 0.5, actions_text, fontsize=9, wrap=True, verticalalignment='top')
+        ax_info.text(0, -0.5, actions_text, fontsize=9, wrap=True, verticalalignment='top')
         # Show score
-        ax_info.text(0, -8, f"Score: {self.score}", fontsize=12)
+        ax_info.text(0, -9, f"Score: {self.score}", fontsize=12)
 
         plt.tight_layout()
 
@@ -298,7 +318,6 @@ class TetrisGame:
         if np.any(self.board[0]):
             self.game_over = True
 
-
     def get_state(self):
         # Return current game state representation (for Q-learning input)
         pass
@@ -313,7 +332,12 @@ class TetrisGame:
             player_input = self.player_input(valid_actions=valid_actions)  # Edit this for the robot, move MUST BE VALID
             if not player_input:  # exits the game 
                 continue
-            self.update_board(rot_idx=player_input[0], x=player_input[1])
+            info = self.update_board(rot_idx=player_input[0], x=player_input[1])
+            self.render(
+                valid_actions=valid_actions, 
+                placement_mask=info["placement_mask"], 
+                pre_clear_board=info["pre_clear_board"]
+                )
             self.check_game_over()
         self.render(valid_actions=None)
         print("Final score:", self.score)
