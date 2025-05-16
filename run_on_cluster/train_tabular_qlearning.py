@@ -31,7 +31,7 @@ def run_experiment(alpha, gamma, output_dir):
     # Fixed training parameters
     width, height = 6, 6
     state_mode = 'flat'
-    num_episodes = 10_000 #_000
+    num_episodes = 1_000_000 #_000
     max_steps = 500
     epsilon = 0.1
     epsilon_min = 0.01
@@ -98,7 +98,7 @@ def run_experiment(alpha, gamma, output_dir):
     plt.plot(avg_rewards)
     plt.xlabel("Episode batch")
     plt.ylabel("Total Reward")
-    plt.title(f"Training Progress: Average Reward over 100 Equal Training Segments: alpha={alpha}, gamma={gamma}")
+    plt.title(f"Training Progress: Avg Reward over batch: alpha={alpha}, gamma={gamma}")
     plt.grid(True)
     plt.tight_layout()
     png_path = os.path.join(output_dir, f"{prefix}_progress.png")
@@ -110,11 +110,11 @@ def run_experiment(alpha, gamma, output_dir):
 
 def main():
     # Create output directory
-    output_dir = f"tabular_qlearning_result_10000_episode"
+    output_dir = f"tabular_qlearning_result_1_000_000_episode"
     os.makedirs(output_dir, exist_ok=True)
 
-    alphas = [0.05, 0.1, 0.2, 0.5]
-    gammas = [0.5, 0.8, 0.9, 0.95]
+    alphas = [0.1, 0.2, 0.5]
+    gammas = [0.5, 0.8, 0.95]
 
     for alpha in alphas:
         for gamma in gammas:
