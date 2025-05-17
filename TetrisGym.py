@@ -172,7 +172,7 @@ class TetrisGym:
 
     def _compute_reward(self, info, done):
         lines_cleared = info["lines_cleared"]
-        clear_line_reward = {0: 0, 1: 2, 2: 5, 3: 15, 4: 60}.get(lines_cleared, 0)
+        clear_line_reward = {0: 0, 1: 2, 2: 5, 3: 15, 4: 60}.get(lines_cleared, 0) * 5
         survival_reward = 0.2
         death_reward = -10 if done and self.game.game_over else 0
         return clear_line_reward + survival_reward + death_reward
