@@ -142,11 +142,14 @@ class TetrisGym:
         rot_idx, x = self.id_to_action[action_id]
         info = self.game.update_board(rot_idx, x)
         self.step_count += 1
-        reward = info["reward"]
 
         # check if training is done: when game is over or exceeds max training steps
         self.game.check_game_over()
         done = self.game.game_over or (self.max_steps is not None and self.step_count >= self.max_steps)
+
+        # Compute reward
+        reward = self._compute_reward(info, done)
+        info["reward"] = reward  # record down reward
 
         # next step
         if not done:
@@ -167,6 +170,12 @@ class TetrisGym:
 
         return next_state, reward, done, info
 
+    def _compute_reward(self, info, done):
+        lines_cleared = info["lines_cleared"]
+        clear_line_reward = {0: 0, 1: 2, 2: 5, 3: 15, 4: 60}.get(lines_cleared, 0)
+        survival_reward = 0.2
+        death_reward = -10 if done and self.game.game_over else 0
+        return clear_line_reward + survival_reward + death_reward
 
 
     def render(self, info=None):

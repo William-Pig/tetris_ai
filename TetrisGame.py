@@ -155,12 +155,6 @@ class TetrisGame:
         """Compute the actual score and reward for this move"""
         return {0: 0, 1: 2, 2: 5, 3: 15, 4: 60}.get(lines_cleared, 0)
 
-    def _compute_reward(self, lines_cleared):
-        """Compute the actual score and reward for this move"""
-        clear_line_reward = self._compute_score(lines_cleared)
-        survival_reward = 0.2
-        return clear_line_reward + survival_reward
-
     def update_board(self, rot_idx, x):
         """
         Apply the selected move to the board:
@@ -190,10 +184,7 @@ class TetrisGame:
         self._lock_piece(piece, (y, x))
         self.last_action = f'({rot_idx}, {x})'
         lines_cleared = self._clear_lines()
-
-        # Computes reward, TODO: later override _compute_reward() with heuristics (e.g., bumpiness, holes).
         self.score += self._compute_score(lines_cleared)
-        reward = self._compute_reward(lines_cleared)
 
         output_info = {
             "piece": piece_type,
@@ -201,7 +192,6 @@ class TetrisGame:
             "x": x,
             "y": y,
             "lines_cleared": lines_cleared,
-            "reward": reward,
             "score": self.score,
             "pre_clear_board": pre_clear_board,
             "placement_mask": placement_mask
