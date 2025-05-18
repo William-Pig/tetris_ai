@@ -56,7 +56,7 @@ class TetrisGym:
         state = self.get_state()
         return state
 
-    def get_state(self):
+    def get_state(self, features_dict=None):
         """Returns the state of the game, depending on the state mode"""
         board = self.game.board
         curr_piece = self.game.current_piece[0]  # just the type for now
@@ -67,8 +67,10 @@ class TetrisGym:
         elif self.state_mode=='tensor':
             return self._extract_tensor(board, curr_piece, next_piece)
         elif self.state_mode=='features':
+            if features_dict is None:  # first time computation, only for reset()
+                features_dict = self._compute_board_features(board)
             tensor = self._extract_tensor(board, curr_piece, next_piece)
-            features = self._extract_features(board, curr_piece, next_piece)
+            features = self._extract_features(features_dict, curr_piece, next_piece)
             return (tensor, features)
 
     def _extract_tensor(self, board, curr_piece, next_piece):
@@ -106,11 +108,7 @@ class TetrisGym:
         v[idx] = 1.0
         return v
 
-    def _extract_features(self, board, curr_piece, next_piece):
-        """
-        TODO: brainstorm features
-        - Number of holes
-        """
+    def _extract_features(self, features_dict, curr_piece, next_piece):
         # One-hot encode current and next piece
         piece_to_idx = {'I':0, 'J':1, 'L':2, 'O':3, 'S':4, 'Z':5, 'T':6}
         curr_idx = piece_to_idx[curr_piece]
@@ -118,40 +116,11 @@ class TetrisGym:
         v_curr = self._one_hot(curr_idx)  # size 7
         v_next = self._one_hot(next_idx)  # size 7
 
-        max_height, min_height, total_height, max_bumpiness, total_bumpiness = self._height_features(board)
-        features = [max_height, min_height, total_height, max_bumpiness, total_bumpiness]
-
-        holes = self._count_holes(board)
-        features.append(holes)
+        # other features
+        ordered_keys = ["max_h","min_h","total_h","max_bump","total_bump","total_holes"]  # explicit order, for safety
+        features = np.asarray([features_dict[k] for k in ordered_keys], dtype=np.float32)
 
         return torch.tensor(np.concatenate([features, v_curr, v_next]), dtype=torch.float32)
-
-    def _height_features(self, board):
-        h, _ = board.shape
-        mask = (board != 0)  # mask for filled cells
-        filled_rows = np.argmax(mask, axis=0)  # first filled row per column, i.e. max height of each col
-        empty_cols = ~np.any(mask, axis=0)
-        filled_rows[empty_cols] = h  # if column empty, treat as full height from bottom
-
-        col_heights = h - filled_rows  # vector of shape (w,)
-        abs_height_diff = np.abs(np.diff(col_heights))
-        
-        max_height = float(np.max(col_heights))
-        min_height = float(np.min(col_heights))
-        total_height = float(np.sum(col_heights))
-        max_bumpiness = float(np.max(abs_height_diff))
-        total_bumpiness = float(np.sum(abs_height_diff))
-        return max_height, min_height, total_height, max_bumpiness, total_bumpiness
-    
-    def _count_holes(self, board):
-        """
-        A hole is defined as an empty space such that there is at least one tile in the same column above it
-        """
-        filled = board != 0                       # bool mask of filled cells
-        # cumulative OR of 'filled' down each column
-        accum_filled = np.maximum.accumulate(filled, axis=0)  # accumulate: once we see a 1, every row below keeps 1
-        holes = (~filled) & accum_filled  # hole if filled accumulatively but not actually filled
-        return float(holes.sum())
 
 
 
@@ -175,8 +144,14 @@ class TetrisGym:
         self.game.check_game_over()
         done = self.game.game_over or (self.max_steps is not None and self.step_count >= self.max_steps)
 
+        # Compute board features
+        if self.state_mode == 'features':
+            features_dict = self._compute_board_features(self.game.board)
+        else:
+            features_dict = None
+
         # Compute reward
-        reward = self._compute_reward(info, done)
+        reward = self._compute_reward(info, done, features_dict)
         info["reward"] = reward  # record down reward
 
         # next step
@@ -188,7 +163,7 @@ class TetrisGym:
                 done = True
         else:
             self.valid_actions = []  # empty possible actions
-        next_state = self.get_state()
+        next_state = self.get_state(features_dict)
 
         # Rendering
         if self.render_mode == 'render':
@@ -198,7 +173,7 @@ class TetrisGym:
 
         return next_state, reward, done, info
 
-    def _compute_reward(self, info, done):
+    def _compute_reward(self, info, done, features_dict):
         reward = 0
     
         lines_cleared = info["lines_cleared"]
@@ -211,14 +186,41 @@ class TetrisGym:
         death_reward = -10 if done and self.game.game_over else 0
         reward += death_reward
 
-        if self.state_mode=='features':
-            board = self.game.board
-            _, _, total_height, _, total_bumpiness = self._height_features(board)
-            holes = self._count_holes(board)
-            reward += -0.5 * total_height
-            reward += -0.3 * holes
-            reward += -0.1 * total_bumpiness
+        if self.state_mode=='features' and features_dict is not None:
+            reward += -0.5 * features_dict["total_h"]
+            reward += -0.3 * features_dict["total_holes"]
+            reward += -0.1 * features_dict["total_bump"]
         return reward
+
+    def _compute_board_features(self, board):
+        """When chaning features, be sure to update _extract_features' ordered key"""
+        h, _ = board.shape
+        filled = (board != 0)  # mask for filled cells
+        filled_rows = np.argmax(filled, axis=0)  # first filled row per column, i.e. max height of each col
+        empty_cols = ~np.any(filled, axis=0)
+        filled_rows[empty_cols] = h  # if column empty, treat as full height from bottom
+
+        col_heights = h - filled_rows  # vector of shape (w,)
+        abs_height_diff = np.abs(np.diff(col_heights))
+
+        max_height = float(np.max(col_heights))
+        min_height = float(np.min(col_heights))
+        total_height = float(np.sum(col_heights))
+        max_bumpiness = float(np.max(abs_height_diff))
+        total_bumpiness = float(np.sum(abs_height_diff))
+
+        accum_filled = np.maximum.accumulate(filled, axis=0)  # accumulate: once we see a 1, every row below keeps 1
+        holes = (~filled) & accum_filled  # hole if filled accumulatively but not actually filled
+        total_holes = float(holes.sum())
+
+        return {
+            "max_h": max_height,
+            "min_h": min_height,
+            "total_h": total_height,
+            "max_bump": max_bumpiness,
+            "total_bump": total_bumpiness,
+            "total_holes": total_holes,
+        }
 
 
 
