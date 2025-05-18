@@ -56,44 +56,40 @@ class TetrisGym:
         state = self.get_state()
         return state
 
-
-
     def get_state(self):
         """Returns the state of the game, depending on the state mode"""
         board = self.game.board
         curr_piece = self.game.current_piece[0]  # just the type for now
         next_piece = self.game.next_piece[0]
 
-        if self.state_mode=='tensor':
-            return self._extract_tensor(board, curr_piece, next_piece)
-        elif self.state_mode=='flat':
+        if self.state_mode=='flat':
             return self._extract_tensor_flat(board, curr_piece, next_piece)
+        elif self.state_mode=='tensor':
+            return self._extract_tensor(board, curr_piece, next_piece)
         elif self.state_mode=='features':
-            return self._extract_features(board, curr_piece, next_piece)
+            tensor = self._extract_tensor(board, curr_piece, next_piece)
+            features = self._extract_features(board, curr_piece, next_piece)
+            return (tensor, features)
 
     def _extract_tensor(self, board, curr_piece, next_piece):
         """Returns the state as a tensor with the actual 2D tetris board"""
         h, w = board.shape
         channels = []
         piece_to_idx = {'I':0,'J':1,'L':2,'O':3,'S':4,'Z':5,'T':6}  # a lookup table to one-hot encode
-
         # C0: the board
         channels.append(board.astype(np.float32))
-
         # C1-7: current piece one‑hots, maintain board dimension (full 1s or 0s) for CNN-friendliness
         current_idx = piece_to_idx[curr_piece]
         for piece_idx in range(7):
             channels.append(
                 np.full((h, w), 1.0 if piece_idx==current_idx else 0.0, dtype=np.float32)
                 )
-
         # C8-14: next piece one‑hots
         next_idx = piece_to_idx[next_piece]
         for piece_idx in range(7):
             channels.append(
                 np.full((h, w), 1.0 if piece_idx==next_idx else 0.0, dtype=np.float32)
                 )
-
         return torch.from_numpy(np.stack(channels, axis=0))
 
     def _extract_tensor_flat(self, board, curr_piece, next_piece):
@@ -123,7 +119,15 @@ class TetrisGym:
         - Next piece
         - Current piece
         """
-        pass
+        piece_to_idx = {'I':0, 'J':1, 'L':2, 'O':3, 'S':4, 'Z':5, 'T':6}
+        curr_idx = piece_to_idx[curr_piece]
+        next_idx = piece_to_idx[next_piece]
+        v_curr = self._one_hot(curr_idx)  # size 7
+        v_next = self._one_hot(next_idx)  # size 7
+
+        features = []  # TODO: to be added
+
+        return torch.tensor(np.concatenate([features, v_curr, v_next]), dtype=torch.float32)
 
 
 
@@ -172,7 +176,7 @@ class TetrisGym:
 
     def _compute_reward(self, info, done):
         lines_cleared = info["lines_cleared"]
-        clear_line_reward = {0: 0, 1: 2, 2: 5, 3: 15, 4: 60}.get(lines_cleared, 0) * 5
+        clear_line_reward = {0: 0, 1: 2, 2: 5, 3: 15, 4: 60}.get(lines_cleared, 0) * self.game.width
         survival_reward = 0.2
         death_reward = -10 if done and self.game.game_over else 0
         return clear_line_reward + survival_reward + death_reward
