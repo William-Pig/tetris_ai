@@ -214,8 +214,6 @@ class TetrisGym:
         imageio.mimsave(filename, images, fps=fps)
         print(f"GIF saved to {filename}")
 
-
-
     def get_action_space_size(self):
         """Returns how many possible actions there are"""
         return len(self.full_action_space)
