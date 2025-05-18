@@ -43,30 +43,32 @@ class DQNCNN(nn.Module):
 
 
 class DQNAgent:
-    def __init__(self, state_shape, num_actions, device='cpu'):
+    def __init__(self, state_shape, num_actions, device='cpu',
+                 alpha=0.001, gamma=0.9,
+                 epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995):
         self.state_shape = state_shape  # (# channel, board height, board width) e.g. (15, 20, 10)
         self.num_actions = num_actions  # number of available actions
         self.device = device  # training device, cpu or gpu
 
         # Hyperparameters
-        self.gamma = 0.5
-        self.epsilon = 1.0
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.9999
-        self.learning_rate = 0.001
+        self.alpha = alpha
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay
 
-        self.memory = deque(maxlen=10000)  # Replay buffer
+        self.memory = deque(maxlen=10_000)  # Replay buffer
 
         # Models
         self.model = DQNCNN(state_shape, num_actions).to(self.device)  # create the main DQN
         self.target_model = DQNCNN(state_shape, num_actions).to(self.device)  # Frozen DQN, for finding stable target
         self.target_model.load_state_dict(self.model.state_dict())  # Copies weights from main model into frozen model
         self.target_model.eval()  # since we use it for inference
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)  # Adam optimizer for learning
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.alpha)  # Adam optimizer for learning
 
     def memorize(self, state, action, reward, next_state, done):
         # Detach states when storing. Each state is a torch tensor of shape e.g. (15, 20, 10), see self.state_shape
-        self.memory.append((state.clone().detach(), action, reward, next_state.clone().detach(), done))
+        self.memory.append((state.detach().cpu(), action, reward, next_state.detach().cpu(), done))
 
     def act(self, state, valid_action_ids):
         """Epsilon-greedy action selection using only valid actions"""
@@ -85,35 +87,31 @@ class DQNAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-    def save(self, path):
-        torch.save(self.model.state_dict(), path)
-
-    def load(self, path):
-        self.model.load_state_dict(torch.load(path, map_location=self.device))
-        self.target_model.load_state_dict(self.model.state_dict())
-
     def replay(self, batch_size):
+        """
+        Samples mini-batch of past experience from memory
+        Use them to train NN by minimizing the squared error between predicted Q-values and target Q-values
+        """
         if len(self.memory) < batch_size:
             return None  # not enough samples yet
 
         minibatch = random.sample(self.memory, batch_size)
 
         # organize batch into tensors. B: batch size, C: channel size, H: board height, W: board width
-        states = torch.stack([s for (s, _, _, _, _) in minibatch]).to(self.device) # [B, C, H, W]
-        actions = torch.tensor([a for (_, a, _, _, _) in minibatch], dtype=torch.long).to(self.device)  # [B]
-        rewards = torch.tensor([r for (_, _, r, _, _) in minibatch], dtype=torch.float32).to(self.device)  # [B]
-        next_states = torch.stack([s_ for (_, _, _, s_, _) in minibatch]).to(self.device)    # [B, C, H, W]
-        dones = torch.tensor([d for (_, _, _, _, d) in minibatch], dtype=torch.float32).to(self.device)   # [B]
+        states = torch.stack([s.to(self.device) for (s, _, _, _, _) in minibatch]) # [B, C, H, W]
+        actions = torch.tensor([a for (_, a, _, _, _) in minibatch], dtype=torch.long, device=self.device)  # [B]
+        rewards = torch.tensor([r for (_, _, r, _, _) in minibatch], dtype=torch.float32, device=self.device)  # [B]
+        next_states = torch.stack([s_.to(self.device) for (_, _, _, s_, _) in minibatch])    # [B, C, H, W]
+        dones = torch.tensor([d for (_, _, _, _, d) in minibatch], dtype=torch.float32, device=self.device)   # [B]
 
-        # Predicted Q(s, a)
-        self.model.train()
+        # Predicted Q(s, a), from main model
         q_pred = self.model(states)  # [B, num_actions], compute Q-values for all actions in each state
         q_pred = q_pred.gather(1, actions.unsqueeze(1)).squeeze(1)  # [B], .gather picks Q-value for actual action taken
 
-        # Target Q-values
+        # Target Q-values, from frozen target model
         with torch.no_grad():
             q_next = self.target_model(next_states)  # [B, num_actions], find all future q-values
-            q_next_max = torch.max(q_next, dim=1)[0]  # [B], max Q-value for next state
+            q_next_max = q_next.max(dim=1)[0]  # [B], max Q-value for next state
             q_target = rewards + self.gamma * q_next_max * (1 - dones)  # [B], if done target = rewards
 
         #  Loss and Backprop
@@ -123,9 +121,32 @@ class DQNAgent:
         # Updates the main model's weights 
         self.optimizer.zero_grad()
         loss.backward()  # back propagation
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)  # rescales gradients s.t. global l2-norm<=max_norm 
         self.optimizer.step()
 
         # Decay epsilon
         self.update_epsilon()
 
         return loss.item()
+
+    def save(self, path, extra=None):
+        """Save the agent, for future training"""
+        checkpoint = {
+            "model": self.model.state_dict(),  # main model
+            "target": self.target_model.state_dict(),  # frozen model
+            "optimizer": self.optimizer.state_dict(),
+            "epsilon": self.epsilon,  # maintain epsilon for future training
+            "memory": list(self.memory),   # convert deque to list
+        }
+        if extra:  # episode_rewards, episode_num, etc.
+            checkpoint.update(extra)
+
+        torch.save(checkpoint, path)
+
+    def load_from_dict(self, checkpoint_dict):
+        """Takes in a checkpoint dict, load a trained agent to resume training/do analysis etc"""
+        self.model.load_state_dict(checkpoint_dict["model"])
+        self.target_model.load_state_dict(checkpoint_dict["target"])
+        self.optimizer.load_state_dict(checkpoint_dict["optimizer"])
+        self.epsilon = checkpoint_dict["epsilon"]
+        self.memory = deque(checkpoint_dict["memory"], maxlen=self.memory.maxlen)
