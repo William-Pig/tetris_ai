@@ -9,26 +9,40 @@ import torch
 from TetrisGym_0517 import TetrisGym
 from batch_dqn import DQNAgent
 
+
+import torch
+
+
+# ——————————————————————————————
+# 0) Check that PyTorch sees the GPU
+# ——————————————————————————————
+print("CUDA available:", torch.cuda.is_available())
+print("Number of GPUs:", torch.cuda.device_count())
+print("Current device:", torch.cuda.current_device(), 
+      torch.cuda.get_device_name(torch.cuda.current_device()))
+
+DEVICE = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+print("Using device:", DEVICE)
+
+
 # ——————————————————————————————
 # 1) Simulation & hyper‐parameters
 # ——————————————————————————————
-NUM_EPISODES        = 100_000 #_000
-MAX_STEPS_PER_EPISODE = 5_000
-ALPHA               = 0.001
+NUM_EPISODES        = 5_000 #_000
+MAX_STEPS_PER_EPISODE = 1_000
+ALPHA               = 0.01
 GAMMA               = 0.5
 EPSILON_MIN         = 0.01
 EPSILON_DECAY       = 0.9999
 BATCH_SIZE          = 128
 TARGET_UPDATE_FREQ  = 64
 
-BOARD_WIDTH, BOARD_HEIGHT = 6, 6
+BOARD_WIDTH, BOARD_HEIGHT = 10, 20  # 10, 20 # 6, 6
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("Using device:", DEVICE)
 
 
 # ── at the top, after defining SAVE_DIR ───────────────────────────────
-GIF_CHECKPOINTS = {1000, } # 10_000, 100_000,1_000_000
+GIF_CHECKPOINTS = {1000,10_000, 100_000,1_000_000 } # 
 # you can adjust these to whatever episode numbers you want GIFs for
 
 def evaluate_and_save_gif(ep):
@@ -58,7 +72,7 @@ def evaluate_and_save_gif(ep):
 # ——————————————————————————————
 # 2) Saving & resume setup
 # ——————————————————————————————
-SAVE_DIR         = f"batch_dqn_resume_results_NUM_EPISODES_{NUM_EPISODES}"
+SAVE_DIR         = f"batch_dqn_resume_results_NUM_EPISODES_{NUM_EPISODES}_board_{BOARD_WIDTH}x{BOARD_HEIGHT}_MAX_STEPS_PER_EPISODE_{MAX_STEPS_PER_EPISODE}_0518_rewardfunction"
 CHECKPOINT_PATH  = os.path.join(SAVE_DIR, "latest.pth")
 os.makedirs(SAVE_DIR, exist_ok=True)
 
