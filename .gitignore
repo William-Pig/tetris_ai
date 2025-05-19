@@ -1,6 +1,8 @@
 __pycache__/
 examples/
+tabular_checkpoints/
 batch_dqn_checkpoints/
 feature_dqn_checkpoints/
+feature_mlp_checkpoints/
 *.pkl
 *.gif

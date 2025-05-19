@@ -22,18 +22,18 @@ class FeatureDQNCNN(nn.Module):
         # CNN layers
         self.conv1 = nn.Conv2d(c, 32, kernel_size=3, stride=1, padding=1)  # keep same size
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1)
+        # self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1)
         self.gap = nn.AdaptiveAvgPool2d(1)   # used to bridge CNN and discrete features
         # Fully connected layers
-        self.fc1 = nn.Linear(64 + feature_dim, 512)  # always 64 CNN features + additional features
-        self.fc2 = nn.Linear(512, num_actions)
+        self.fc1 = nn.Linear(64 + feature_dim, 32)  # always 64 CNN features + additional features
+        self.fc2 = nn.Linear(32, num_actions)
 
     def forward(self, board_tensor, features):
         """Propagates prediction forward in the NN"""
         x = board_tensor.float()  # ensure float32
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
+        # x = F.relu(self.conv3(x))
         x = self.gap(x).view(x.size(0), -1)  # [B, 64]
         x = torch.cat([x, features], dim=1)  # [B, 64 + feature_dim]
         x = F.relu(self.fc1(x))

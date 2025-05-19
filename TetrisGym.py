@@ -177,19 +177,20 @@ class TetrisGym:
         reward = 0
     
         lines_cleared = info["lines_cleared"]
-        clear_line_reward = {0: 0, 1: 2, 2: 5, 3: 15, 4: 60}.get(lines_cleared, 0) * self.game.width
+        # clear_line_reward = {0: 0, 1: 2, 2: 5, 3: 15, 4: 60}.get(lines_cleared, 0) * self.game.width
+        clear_line_reward = 1 + lines_cleared**2 * self.game.width
         reward += clear_line_reward
 
-        survival_reward = 0.2
+        survival_reward = 0
         reward += survival_reward
 
-        death_reward = -10 if done and self.game.game_over else 0
+        death_reward = -2 if done and self.game.game_over else 0
         reward += death_reward
 
         if self.state_mode=='features' and features_dict is not None:
-            reward += -0.5 * features_dict["total_h"]
-            reward += -0.3 * features_dict["total_holes"]
-            reward += -0.1 * features_dict["total_bump"]
+            reward += -0. * features_dict["total_h"]
+            reward += -0. * features_dict["total_holes"]
+            reward += -0. * features_dict["total_bump"]
         return reward
 
     def _compute_board_features(self, board):
