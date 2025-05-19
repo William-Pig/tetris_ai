@@ -12,7 +12,10 @@ class TetrisGym:
         - state_mode: 'flat', 'tensor', 'features'
         - render_mode: 'skip', 'render', 'capture'
         """
+        
         self.game = TetrisGame(width, height)
+        self.width  = width        
+        self.height = height      
         self.max_steps = max_steps
         self.state_mode = state_mode
         self.render_mode = render_mode
@@ -171,11 +174,43 @@ class TetrisGym:
         return next_state, reward, done, info
 
     def _compute_reward(self, info, done):
-        lines_cleared = info["lines_cleared"]
-        clear_line_reward = {0: 0, 1: 2, 2: 5, 3: 15, 4: 60}.get(lines_cleared, 0) * 5
-        survival_reward = 0.2
-        death_reward = -10 if done and self.game.game_over else 0
-        return clear_line_reward + survival_reward + death_reward
+        """
+        Compute a shaped reward combining:
+          • Strong positive for line clears (bigger for 3‐ and 4‐line clears)
+          • Small survival bonus each step
+          • Negative penalties for aggregate height, bumpiness, and holes
+          • Large penalty for death
+        """
+        # 1) Line-clear reward
+        lines = info.get("lines_cleared", 0)
+        line_rewards = {0: 0, 1: 1, 2: 3, 3: 5, 4: 10}
+        reward = line_rewards.get(lines, 0) * 25
+
+        # 2) Survival bonus
+        reward += 0.1
+
+        # 3) Heuristic penalties from the board
+        #   a) Column heights
+        heights = self.height - np.argmax(self.board[::-1, :], axis=0)
+        reward -= 0.02 * heights.sum()              # aggregate‐height penalty
+        #   b) Bumpiness (adjacent height differences)
+        bumpiness = np.abs(np.diff(heights)).sum()
+        reward -= 0.1 * bumpiness
+        #   c) Holes (empty cells under a block in each column)
+        holes = 0
+        for col in range(self.width):
+            col_data = self.board[:, col]
+            first_block = np.argmax(col_data)
+            if col_data[first_block] == 1:
+                holes += np.sum(col_data[first_block+1:] == 0)
+        reward -= 1.0 * holes
+
+        # 4) Death penalty if the game ends
+        if done and self.game.game_over:
+            reward -= 20
+
+        return reward
+
 
 
     def render(self, info=None):
