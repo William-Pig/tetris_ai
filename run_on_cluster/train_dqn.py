@@ -28,10 +28,10 @@ print("Using device:", DEVICE)
 # ——————————————————————————————
 # 1) Simulation & hyper‐parameters
 # ——————————————————————————————
-NUM_EPISODES        = 5_000 #_000
+NUM_EPISODES        = 6_000 #_000
 MAX_STEPS_PER_EPISODE = 1_000
-ALPHA               = 0.01
-GAMMA               = 0.5
+ALPHA               = 0.2 # previously 0.01 and 0.001
+GAMMA               = 0.8
 EPSILON_MIN         = 0.01
 EPSILON_DECAY       = 0.9999
 BATCH_SIZE          = 128
