@@ -29,10 +29,10 @@ def select_action(state_key, valid_actions, Q, epsilon):
 
 def run_experiment(alpha, gamma, output_dir):
     # Fixed training parameters
-    width, height = 6, 6
+    width, height = 10, 20 #6, 6
     state_mode = 'flat'
     num_episodes = 1_000_000 #_000
-    max_steps = 500
+    max_steps = 5000
     epsilon = 0.1
     epsilon_min = 0.01
     epsilon_decay = 0.99999
@@ -110,11 +110,11 @@ def run_experiment(alpha, gamma, output_dir):
 
 def main():
     # Create output directory
-    output_dir = f"tabular_qlearning_result_1_000_000_episode"
+    output_dir = f"tabular_qlearning_result_1_000_000_episode_10_20_board_max_5000_steps"
     os.makedirs(output_dir, exist_ok=True)
 
-    alphas = [0.1, 0.2, 0.5]
-    gammas = [0.5, 0.8, 0.95]
+    alphas = [0.2]
+    gammas = [0.5, 0.8]
 
     for alpha in alphas:
         for gamma in gammas:
