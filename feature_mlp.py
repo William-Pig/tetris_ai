@@ -2,176 +2,253 @@ import random
 from collections import deque
 
 import numpy as np
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-class FeatureMLP(nn.Module):
-    def __init__(self, num_actions, input_dim):
+PIECE2IDX = {'I':0,'J':1,'L':2,'O':3,'S':4,'Z':5,'T':6}
+
+
+def flatten_obs(obs):
+    """
+    Raw (board, curr_id, next_id) -> flattened board and one-hot curr and next piece
+    """
+    board, curr, next_ = obs
+    flat_board = board.flatten().astype(np.float32)  # H*W
+    one = np.eye(7, dtype=np.float32)
+    return np.concatenate([flat_board, one[curr], one[next_]])  # H*W + 2*7 dimensional
+
+
+
+class DQNMLP(nn.Module):
+    """Simple 2-hidden-layer MLP"""
+    def __init__(self, input_dim, n_actions):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, num_actions)
-        )
+        self.fc1 = nn.Linear(input_dim, 128)
+        self.fc2 = nn.Linear(128, 64)
+        self.out = nn.Linear(64, n_actions)
 
-    def forward(self, x):  # x shape: [B, F]
-        return self.net(x)
-
+    def forward(self, x):
+        x = x.float()
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        return self.out(x)  # (B, n_actions)
 
 
-class FeatureMLPAgent:
-    def __init__(self, num_actions, feature_dim, device='cpu',
+class MLPAgent:
+    def __init__(self, board_width, board_height,
                  alpha=0.001, gamma=0.9,
-                 epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995):
-        self.num_actions = num_actions  # number of available actions
-        self.feature_dim = feature_dim  # f
-        self.device = device  # training device, cpu or gpu
+                 eps_start=1.0, eps_min=0.01, eps_decay=0.995,
+                 memory_size=10_000, batch_size=128, target_sync=64,
+                 device=None):
 
-        # Hyperparameters
-        self.alpha = alpha
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.epsilon_min = epsilon_min
-        self.epsilon_decay = epsilon_decay
+        self.board_width, self.board_height = board_width, board_height
+        self.alpha, self.gamma = alpha, gamma
+        self.eps, self.eps_min, self.eps_decay = eps_start, eps_min, eps_decay
+        self.memory_size, self.batch_size, self.target_sync= memory_size, batch_size, target_sync
 
-        self.memory = deque(maxlen=30_000)  # Replay buffer
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Models
-        self.model = FeatureMLP(num_actions, feature_dim).to(self.device)  # create the main DQN
-        self.target_model = FeatureMLP(num_actions, feature_dim).to(self.device)  # Frozen DQN
-        self.target_model.load_state_dict(self.model.state_dict())  # Copies weights from main model into frozen model
-        self.target_model.eval()  # since we use it for inference
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.alpha)  # Adam optimizer for learning
+        # Lazy-initialised after env is supplied
+        self.model = self.target_model = self.optimizer = None
+        self.memory = deque(maxlen=memory_size)
 
-    def memorize(self, state, action, reward, next_state, done, next_valid_ids):
-        # Detach states when storing
-        state = state[1].to(self.device)  # only get feature, not board
-        next_state = next_state[1].to(self.device)
-        mask = torch.zeros(self.num_actions, dtype=torch.bool)  # mask for valid actions
-        mask[next_valid_ids] = True  # (on CPU)
-        self.memory.append((state.detach(),
-                            action,
-                            reward, 
-                            next_state.detach(),
-                            done,
-                            mask
-                            ))
+        self.rewards, self.scores = [], []  # for logging
 
-    def _ids_to_mask(self, ids_batch):
-        """
-        Converts every list of IDs into a 0/1 mask tensor once per sample
-        ids_batch = list[list[int]], length = B
-        """
-        B = len(ids_batch)
-        mask = torch.zeros((B, self.num_actions),      # bool mask on device
-                        dtype=torch.bool,
-                        device=self.device)
-        for i, ids in enumerate(ids_batch):
-            mask[i, ids] = True
-        return mask
+    # --- observation / reward plugs ---
+    def parse_obs(self, obs):
+        board = obs[0]
+        flat_obs = flatten_obs(obs)  # (H*W+14, )
+
+        # height features
+        h, _ = board.shape
+        filled_mask = (board != 0)  # mask for filled cells
+        filled_rows = np.argmax(filled_mask, axis=0)  # first filled row per column, i.e. max height of each col
+        empty_cols = ~np.any(filled_mask, axis=0)
+        filled_rows[empty_cols] = h  # if column empty, treat as full height from bottom
+
+        col_heights = h - filled_rows  # vector of shape (w,)
+        abs_height_diff = np.abs(np.diff(col_heights))
+
+        max_height = float(np.max(col_heights))
+        min_height = float(np.min(col_heights))
+        total_height = float(np.sum(col_heights))
+        max_bumpiness = float(np.max(abs_height_diff))
+        total_bumpiness = float(np.sum(abs_height_diff))
+
+        # hole feature: a hole is any empty cell with at least one filled cell above it
+        accum_filled = np.maximum.accumulate(filled_mask, axis=0)  # cumulative of 'filled' down each column
+        holes = (~filled_mask) & accum_filled  # empty cells that have a block above
+        total_holes = float(np.sum(holes))
+
+        features = np.array([
+            max_height, min_height, total_height,
+            max_bumpiness, total_bumpiness,
+            total_holes
+        ], dtype=np.float32)
+
+        return torch.from_numpy(np.concatenate([flat_obs, features]))
 
 
-    def act(self, state, valid_action_ids):
-        """Epsilon-greedy action selection using only valid actions"""
-        if len(valid_action_ids) == 0:
-            raise RuntimeError("No valid actions available")
+    def compute_reward(self, info, done):
+        reward = 1 + info["lines_cleared"]**2 * self.board_width
+        if done and info.get("game_over", True):
+            reward -= 10
+        return reward
 
-        state = state[1].to(self.device).unsqueeze(0)
+    # --- internal helpers ---
+    def _memorize(self, state, action, reward, next_state, done):
+        self.memory.append((state.detach().cpu(), action, reward, next_state.detach().cpu(), done))
 
-        if np.random.rand() < self.epsilon:
+    def _act(self, state, valid_action_ids):
+        """Epsilon-greedy"""
+        if random.random() < self.eps:
             return random.choice(valid_action_ids)
 
-        self.model.eval()  # put to inference as we are inferecing the best action from existing model
+        self.model.eval()
         with torch.no_grad():
-            q_values = self.model(state).squeeze(0)  # prediction step, Shape: (num_actions,)
-            valid_ids_tensor = torch.tensor(valid_action_ids, device=q_values.device, dtype=torch.long)
-            valid_qs = q_values[valid_ids_tensor]  # subset to find only valid actions
-            best_idx = torch.argmax(valid_qs).item()
-            return valid_action_ids[best_idx]
+            q_vals = self.model(state.unsqueeze(0).to(self.device)).squeeze(0)
+        valid_q  = q_vals[valid_action_ids]
+        return valid_action_ids[int(torch.argmax(valid_q).item())]
 
+    def _replay(self):
+        if len(self.memory) < self.batch_size:
+            return
 
-    def update_epsilon(self):
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
-
-    def replay(self, batch_size):
-        """
-        Samples mini-batch of past experience from memory
-        Use them to train NN by minimizing the squared error between predicted Q-values and target Q-values
-        """
-        if len(self.memory) < batch_size:
-            return None  # not enough samples yet
-
-        minibatch = random.sample(self.memory, batch_size)
-
-        # unpack
-        states, actions, rewards, next_states, dones, masks = zip(*minibatch)
-        # organize batch into tensors. B: batch size, C: channel size, H: height, W: width, F: hand-crafted features
-        states = torch.stack(states).to(self.device) # [B, F]
-        actions = torch.tensor(actions,  dtype=torch.long, device=self.device)  # B
-        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)  # B
-        next_states = torch.stack(next_states).to(self.device)  # [B, F]
-        dones = torch.tensor(dones,   dtype=torch.float32, device=self.device)  # B
-        valid_mask = torch.stack(masks).to(self.device)
-
+        minibatch = random.sample(self.memory, self.batch_size)
+        # organize batch into tensors. B: batch size, C: channel size, H: board height, W: board width
+        states = torch.stack([s.to(self.device) for (s, _, _, _, _) in minibatch]) # [B, H*W+14]
+        actions = torch.tensor([a for (_, a, _, _, _) in minibatch], dtype=torch.long, device=self.device)  # [B]
+        rewards = torch.tensor([r for (_, _, r, _, _) in minibatch], dtype=torch.float32, device=self.device)  # [B]
+        next_states = torch.stack([ns.to(self.device) for (_, _, _, ns, _) in minibatch])    # [B, H*W+14]
+        dones = torch.tensor([d for (_, _, _, _, d) in minibatch], dtype=torch.float32, device=self.device)   # [B]
 
         # Predicted Q(s, a), from main model
         q_pred = self.model(states)  # [B, num_actions], compute Q-values for all actions in each state
         q_pred = q_pred.gather(1, actions.unsqueeze(1)).squeeze(1)  # [B], .gather picks Q-value for actual action taken
 
-        # Target Q-values, from frozen target model
         with torch.no_grad():
-            # Single DQN, outdated, need to update
-            # q_next = self.target_model(next_states)  # [B, num_actions], find all future q-values
-            # q_next_max = q_next.max(dim=1)[0]  # [B], max Q-value for next state
-            # Double DQN
-            q_next_all = self.target_model(next_states)          # [B, |A|]
-            q_next_all[~valid_mask] = -1e9                       # effectively −∞
-            best_a = torch.argmax(q_next_all, 1, keepdim=True)
-            q_next_max = q_next_all.gather(1, best_a).squeeze(1)
-            q_target = rewards + self.gamma * q_next_max * (1 - dones)  # [B], if done target = rewards
+            # Single DQN
+            q_next = self.target_model(next_states).max(dim=1)[0]
+            q_target  = rewards + self.gamma * q_next * (1 - dones)
 
-        #  Loss
         loss = F.mse_loss(q_pred, q_target)
-
-        # Updates the main model's weights 
         self.optimizer.zero_grad()
-        loss.backward()  # back propagation
-        # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)  # rescales gradients s.t. global l2-norm<=max_norm 
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)  # rescale gradient
         self.optimizer.step()
 
-        # Decay epsilon, update in train loop, not here
-        # self.update_epsilon()
-
-        # GPU usage check
-        # print("Feature batch device:", states.device)
-        # print("Model device:", next(self.model.parameters()).device)
 
 
-        return loss.item()
+    # --- training loop ---
+    def train(self, env, episodes=10_000, max_steps=1_000):
+        input_dim  = self.parse_obs((np.zeros((self.board_height, self.board_width), dtype=np.uint8),0,0)).numel() # get an example observation, find number of elements
+        n_actions  = len(env.full_action_space)
 
-    def save(self, path, extra=None):
-        """Save the agent, for future training"""
-        checkpoint = {
-            "model": self.model.state_dict(),  # main model
-            "target": self.target_model.state_dict(),  # frozen model
-            "optimizer": self.optimizer.state_dict(),
-            "epsilon": self.epsilon,  # maintain epsilon for future training
-            "memory": list(self.memory),   # convert deque to list
-        }
-        if extra:  # episode_rewards, episode_num, etc.
-            checkpoint.update(extra)
-        torch.save(checkpoint, path)
+        if self.model is None:
+            self.model = DQNMLP(input_dim, n_actions).to(self.device)
+            self.target_model = DQNMLP(input_dim, n_actions).to(self.device)
+            self.target_model.load_state_dict(self.model.state_dict())
+            self.optimizer = optim.Adam(self.model.parameters(), lr=self.alpha)
 
-    def load_from_dict(self, checkpoint_dict):
-        """Takes in a checkpoint dict, load a trained agent to resume training/do analysis etc"""
-        self.model.load_state_dict(checkpoint_dict["model"])
-        self.target_model.load_state_dict(checkpoint_dict["target"])
-        self.optimizer.load_state_dict(checkpoint_dict["optimizer"])
-        self.epsilon = checkpoint_dict["epsilon"]
-        self.memory = deque(checkpoint_dict["memory"], maxlen=self.memory.maxlen)
+        pbar = tqdm(range(1, episodes+1), desc="MLP")
+        for ep in pbar:
+            obs  = env.reset()
+            state = self.parse_obs(obs).to(self.device)
+            total_reward = 0.0
+            done = False
+            step = 0
+
+            while not done and step < max_steps:
+                valid_action_ids = env.get_valid_action_ids()
+                if not valid_action_ids:
+                    break
+
+                action = self._act(state, valid_action_ids)
+                next_raw_obs, _, done, info = env.step(action)
+                reward = self.compute_reward(info, done)
+                total_reward += reward
+
+                next_state = self.parse_obs(next_raw_obs).to(self.device)
+
+                self._memorize(state, action, reward, next_state, done)
+                self._replay()
+
+                state = next_state
+                step += 1
+
+            if ep % self.target_sync == 0:  # sync frozen network
+                self.target_model.load_state_dict(self.model.state_dict())
+
+            self.rewards.append(total_reward)
+            self.scores.append(env.game.score)
+
+            if self.eps > self.eps_min:
+                self.eps *= self.eps_decay
+
+            if len(self.rewards) >= 100:
+                pbar.set_description(f"MLP | mu_100={np.mean(self.rewards[-100:]):.1f} | epsilon={self.eps:.2f}")
+
+    # ---------- save / load ------------------------------------------
+    def save_agent(self, save_file):
+        torch.save(dict(model=self.model.state_dict(),
+                        target=self.target_model.state_dict(),
+                        optimizer=self.optimizer.state_dict(),
+                        epsilon=self.eps,
+                        rewards=self.rewards,
+                        scores=self.scores,
+                        input_dim = self.parse_obs(
+                            (np.zeros((self.board_height, self.board_width), dtype=np.uint8), 0, 0)
+                            ).numel(),
+                        num_actions=self.model.out.out_features,
+                        memory=list(self.memory)),
+                   save_file)
+
+    def load_agent(self, load_file):
+        checkpoint = torch.load(load_file, map_location=self.device)
+        if self.model is None:
+            input_dim = checkpoint["input_dim"]
+            n_act = checkpoint["num_actions"]
+            self.model = DQNMLP(input_dim, n_act).to(self.device)
+            self.target_model = DQNMLP(input_dim, n_act).to(self.device)
+            self.optimizer = optim.Adam(self.model.parameters(), lr=self.alpha)
+
+        self.model.load_state_dict(checkpoint["model"])
+        self.target_model.load_state_dict(checkpoint["target"])
+        self.optimizer.load_state_dict(checkpoint["optimizer"])
+        self.memory = deque(checkpoint["memory"], maxlen=self.memory_size)
+
+        self.eps = checkpoint["epsilon"]
+        self.rewards = checkpoint["rewards"]
+        self.scores = checkpoint["scores"]
+
+
+    def save_gif(self, save_path, max_steps=1000):
+        from TetrisGym import TetrisGym
+
+        env = TetrisGym(width=self.board_width, height=self.board_height, max_steps=max_steps, render_mode="capture")
+
+        # greedy play
+        obs = env.reset()
+        state = self.parse_obs(obs).to(self.device)
+        done = False
+        while not done:
+            valid_action_ids = env.get_valid_action_ids()
+            if not valid_action_ids:
+                break
+
+            # pick best action, always greedy
+            self.model.eval()
+            with torch.no_grad():
+                q_vals = self.model(state.unsqueeze(0).to(self.device)).squeeze(0)
+            best_action = max(valid_action_ids, key=lambda a: q_vals[a].item())
+
+            obs, _, done, _ = env.step(best_action)
+            state = self.parse_obs(obs).to(self.device)
+
+        # Save GIF
+        env.save_gif(save_path)
+        print(f"Saved gameplay GIF to: {save_path}")

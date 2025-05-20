@@ -1,6 +1,4 @@
 import random
-import pickle
-import os
 from collections import deque
 
 import numpy as np
@@ -40,22 +38,14 @@ def tensorize_obs(obs):
 class DQNCNN(nn.Module):
     def __init__(self, in_channels, n_actions):
         """
-        CNN Architecture
-        - 3 convolutional layers: 
-            - layer 1 sees 3x3 (local)
-            - layer 2 sees 5x5 (mid-range), see from layer 1
-            - layer 3 sees 7x7 (long-range), in case of big gaps
-        - 2 fully connected layers:
-            - layer 1 builds hidden features
-            - layer 2 gives output based on the hidden features
+        CNN Architecture: convolution layers -> connected layers
         """
         super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, stride=1, padding=1)  # keep same size
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1)
+        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=(1,3), padding=(0, 1))  # horizontal patterns
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=(3, 1), padding=(1, 0))  # vertical patterns
         self.gap = nn.AdaptiveAvgPool2d(1)   # -> [B,64,1,1]
-        self.fc1 = nn.Linear(64, 512)  # always 64 in_features
-        self.fc2 = nn.Linear(512, n_actions)
+        self.fc1 = nn.Linear(64, 128)  # 64 in_features
+        self.fc2 = nn.Linear(128, n_actions)
         self.out = self.fc2
 
     def forward(self, x):
@@ -63,7 +53,7 @@ class DQNCNN(nn.Module):
         x = x.float()  # ensure float32
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
+        # x = F.relu(self.conv3(x))
         x = self.gap(x).view(x.size(0), -1)  # flatten, from convolution to 
         x = F.relu(self.fc1(x))
         return self.fc2(x)  # Q-values for all actions, (B, n_actions), B means batch size
@@ -73,7 +63,8 @@ class DQNAgent:
     def __init__(self, board_width, board_height,
                  alpha=0.001, gamma=0.9,
                  eps_start=1.0, eps_min=0.01, eps_decay=0.995,
-                 memory_size=10_000, batch_size=128, target_sync=64, device=None):
+                 memory_size=10_000, batch_size=128, target_sync=64,
+                 device=None):
         self.board_width, self.board_height = board_width, board_height
 
         # Hyperparameters
@@ -158,8 +149,8 @@ class DQNAgent:
     # --- train loop ---
     def train(self, env, episodes=10_000, max_steps=1_000):
         # one-time init that needs the env
-        n_actions = len(env.full_action_space)
         state_shape = (15, self.board_height, self.board_width)
+        n_actions = len(env.full_action_space)
 
         if self.model is None:
             self.model = DQNCNN(state_shape[0], n_actions).to(self.device)
@@ -193,8 +184,7 @@ class DQNAgent:
                 state = next_state
                 step += 1
 
-            # sync target network
-            if ep % self.target_sync == 0:
+            if ep % self.target_sync == 0:  # sync frozen network
                 self.target_model.load_state_dict(self.model.state_dict())
 
             self.rewards.append(total_reward)
@@ -240,9 +230,9 @@ class DQNAgent:
         self.optimizer.load_state_dict(checkpoint["optimizer"])
         self.memory = deque(checkpoint["memory"], maxlen=self.memory_size) 
 
-        self.eps      = checkpoint["epsilon"]
-        self.rewards  = checkpoint["rewards"]
-        self.scores   = checkpoint["scores"]
+        self.eps = checkpoint["epsilon"]
+        self.rewards = checkpoint["rewards"]
+        self.scores = checkpoint["scores"]
 
 
     def save_gif(self, save_path, max_steps=1000):
