@@ -46,7 +46,7 @@ def main():
     # 2) Output paths
     # ——————————————————————————————
     # You can override this via: export SAVE_DIR=/some/path
-    SAVE_DIR = os.environ.get("SAVE_DIR", "feature_mlp_checkpoints")
+    SAVE_DIR = os.environ.get("SAVE_DIR", f"feature_mlp_checkpoints_board_{BOARD_WIDTH}*{BOARD_HEIGHT}_NUM_EPISODES_{NUM_EPISODES}")
     os.makedirs(SAVE_DIR, exist_ok=True)
 
     LOAD_PATH = os.path.join(SAVE_DIR, "latest.pth")
