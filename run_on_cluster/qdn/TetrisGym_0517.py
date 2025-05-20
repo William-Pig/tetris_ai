@@ -1,3 +1,11 @@
+"""
+updated may 20th
+summary of the DQN agent:
+
+we encode the entire board tnesor into a 1D vector, and then use a fully connected neural network to predict the Q-values for each action.
+
+"""
+
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -22,7 +30,7 @@ class TetrisGym:
         self.frames = []
 
         # reward-shaping hyperparameters
-        self.hole_creation_penalty = 10.0   # penalty for new holes created
+        self.hole_creation_penalty = 2.0   # penalty for new holes created
         self.hole_fill_reward      = 5.0    # reward for holes filled
         self.well_depth_weight     = 1.0    # penalty per unit well depth
         self.height_diff_weight    = 2.0    # penalty per unit height difference
@@ -184,7 +192,7 @@ class TetrisGym:
 
         # 7) Death penalty
         if done and self.game.game_over:
-            reward -= 99
+            reward -= 10
 
         return reward
 

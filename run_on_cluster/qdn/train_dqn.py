@@ -6,10 +6,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 
-from TetrisGym_0517 import TetrisGym
+from run_on_cluster.qdn.TetrisGym_0517 import TetrisGym
 from batch_dqn import DQNAgent
-
-
 import torch
 
 
@@ -28,10 +26,10 @@ print("Using device:", DEVICE)
 # ——————————————————————————————
 # 1) Simulation & hyper‐parameters
 # ——————————————————————————————
-NUM_EPISODES        = 6_000 #_000
+NUM_EPISODES        = 10_000 #_000
 MAX_STEPS_PER_EPISODE = 1_000
-ALPHA               = 0.2 # previously 0.01 and 0.001
-GAMMA               = 0.8
+ALPHA               = 0.01 # previously 0.01 and 0.001
+GAMMA               = 0.9
 EPSILON_MIN         = 0.01
 EPSILON_DECAY       = 0.9999
 BATCH_SIZE          = 128

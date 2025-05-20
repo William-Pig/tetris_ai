@@ -174,7 +174,7 @@ class TetrisGame:
         y = self._find_drop_height(piece, x)
         if y is None or not self._valid_position(piece, (y, x)):  # additional guard to check y validity
             raise ValueError(f"Invalid move attempted: rotation={rot_idx}, x={x}")
-        
+
         # binary mask for new piece, used for visualization
         placement_mask = np.zeros_like(self.board)
         h, w = piece.shape
@@ -191,10 +191,11 @@ class TetrisGame:
             "rotation": rot_idx,
             "x": x,
             "y": y,
+            "game_over": self.game_over,
             "lines_cleared": lines_cleared,
             "score": self.score,
-            "pre_clear_board": pre_clear_board,
-            "placement_mask": placement_mask
+            "pre_clear_board": pre_clear_board,  # for rendering, shows the board pre-clear line
+            "placement_mask": placement_mask  # for rendering, shows the last placed block
         }
         return output_info
 
@@ -217,8 +218,6 @@ class TetrisGame:
         Render the game using matplotlib:
         - Left: the main board
         - Right: current piece, next piece, score
-
-        TODO: include action chosen by the RL
         """
         # First clear the output in notebook, does nothing in non-notebook environment
         try:
@@ -227,10 +226,9 @@ class TetrisGame:
         except ImportError:
             pass
 
-        current_type, rotations = self.current_piece
+        _, rotations = self.current_piece  # rotations: a list of the current type's rotation variants
         piece = rotations[0]  # Preview is 0-rotation
-
-        next_type, next_rotations = self.next_piece
+        _, next_rotations = self.next_piece
         next_piece = next_rotations[0]
 
         fig = plt.figure(figsize=(8, 6))
@@ -248,13 +246,6 @@ class TetrisGame:
                 rect = patches.Rectangle((x - 0.5, y - 0.5), 1, 1,
                                         linewidth=2, edgecolor='red', facecolor='none', linestyle='--')
                 ax_board.add_patch(rect)
-
-
-        # TODO: Draw grid lines, causes minor mis-alignment
-        # for x in range(self.width + 1):
-        #     ax_board.axvline(x - 0.5, color='black', linewidth=0.5)
-        # for y in range(self.height + 1):
-        #     ax_board.axhline(y - 0.5, color='black', linewidth=0.5)
 
         ax_board.set_xticks(range(self.width))
         ax_board.set_yticks(range(self.height))
@@ -310,15 +301,11 @@ class TetrisGame:
             except ValueError:
                 print("Bad input; try again.")
 
+
     def check_game_over(self):
         """The game is over if any cell in the top row is 1 (occupied)."""
         if np.any(self.board[0]):
             self.game_over = True
-
-    def get_state(self):
-        # Return current game state representation (for Q-learning input)
-        pass
-
 
 
     def play(self):
