@@ -192,7 +192,7 @@ class MLPAgent:
             if len(self.rewards) >= 100:
                 pbar.set_description(f"MLP | mu_100={np.mean(self.rewards[-100:]):.1f} | epsilon={self.eps:.2f}")
 
-    # ---------- save / load ------------------------------------------
+    # --- save / load ---
     def save_agent(self, save_file):
         torch.save(dict(model=self.model.state_dict(),
                         target=self.target_model.state_dict(),

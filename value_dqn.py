@@ -81,13 +81,13 @@ class ValueDQNAgent:
     - Learns V(s) (expected future score)
     - Pick action to max V(s') over all next possible states s' (enumerated on-the-fly)
     """
-    def __init__(self, game_width, game_height,
+    def __init__(self, board_width, board_height,
                  alpha=0.001, gamma=0.95,
                  eps_start=1.0, eps_min=0.01, eps_decay=0.995,
                  memory_size=10_000, batch_size=128,
                  device=None):
 
-        self.board_width, self.board_height = game_width, game_height
+        self.board_width, self.board_height = board_width, board_height
         self.alpha, self.gamma = alpha, gamma
         self.eps, self.eps_min, self.eps_decay = eps_start, eps_min, eps_decay
         self.memory_size, self.batch_size = memory_size, batch_size
@@ -160,7 +160,7 @@ class ValueDQNAgent:
     def _memorize(self, state, reward, next_state, done):
         self.memory.append((state.copy().astype(np.float32), reward, next_state.copy().astype(np.float32), done))
 
-    # ---  training  ---
+    # --- training ---
     def _replay(self):
         if len(self.memory) < self.batch_size:
             return
@@ -201,7 +201,7 @@ class ValueDQNAgent:
                 if action_id is None:  # no legal moves
                     break
 
-                obs, _, done, info = env.step(action_id)  # env.step returns (next_state, reward, done, info)
+                _, _, done, info = env.step(action_id)  # env.step returns (next_state, reward, done, info)
                 reward = self.compute_reward(info, done)
                 total_reward += reward
 
@@ -220,4 +220,60 @@ class ValueDQNAgent:
 
             if len(self.rewards) >= 100:
                 pbar.set_description(f"Value-DQN | mu_100={np.mean(self.rewards[-100:]):.1f} | epsilon={self.eps:.2f}")
+
+# --- save / load ---
+    def save_agent(self, save_file):
+        torch.save(
+            {
+                "model": self.model.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+                "epsilon": self.eps,
+                "rewards": self.rewards,
+                "scores": self.scores,
+                "memory": list(self.memory), # replay buffer
+                "input_dim": self.model.fc1.in_features,
+            },
+            save_file)
+
+    def load_agent(self, path):
+        checkpoint = torch.load(path, map_location=self.device)
+        if self.model is None:
+            in_dim = checkpoint["input_dim"]
+            self.model = ValueNet(in_dim).to(self.device)
+            self.optimizer = optim.Adam(self.model.parameters(), lr=self.alpha)
+
+        self.model.load_state_dict(checkpoint["model"])
+        self.optimizer.load_state_dict(checkpoint["optimizer"])
+        self.memory = deque(checkpoint["memory"], maxlen=self.memory_size)
+
+        self.eps = checkpoint["epsilon"]
+        self.rewards = checkpoint["rewards"]
+        self.scores = checkpoint["scores"]
+
+    def save_gif(self, save_path, max_steps=1000):
+        """
+        Play one greedy game (epsilon=0) and save a GIF.
+        """
+        from TetrisGym import TetrisGym
+
+        env = TetrisGym(width=self.board_width, height=self.board_height, max_steps=max_steps, render_mode="capture")
+
+        # greedy play
+        env.reset()
+        done = False
+        while not done:
+            successors = self._enumerate_successors(env)
+            if not successors:
+                break
+
+            # Pick best successor purely greedily
+            with torch.no_grad():
+                states = torch.tensor(np.stack(list(successors.values())), dtype=torch.float32, device=self.device)
+                vals = self.model(states)
+                best_id = list(successors.keys())[torch.argmax(vals).item()]
+
+            _, _, done, _ = env.step(best_id)
+
+        env.save_gif(save_path)
+        print(f"Saved gameplay GIF to: {save_path}")
 
