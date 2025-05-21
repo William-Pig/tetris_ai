@@ -59,7 +59,7 @@ class DQNCNN(nn.Module):
         return self.fc2(x)  # Q-values for all actions, (B, n_actions), B means batch size
 
 
-class DQNAgent:
+class CNNAgent:
     def __init__(self, board_width, board_height,
                  alpha=0.001, gamma=0.9,
                  eps_start=1.0, eps_min=0.01, eps_decay=0.995,
