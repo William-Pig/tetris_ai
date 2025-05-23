@@ -16,8 +16,8 @@ import torch.optim as optim
 class ValueNet(nn.Module):
     def __init__(self, in_dim):
         super().__init__()
-        self.fc1 = nn.Linear(in_dim, 64)
-        self.fc2 = nn.Linear(64, 64)
+        self.fc1 = nn.Linear(in_dim, 128)
+        self.fc2 = nn.Linear(128, 64)
         self.out = nn.Linear(64, 1)  # scalar, V(s)
 
     def forward(self, x):
@@ -83,8 +83,8 @@ class ValueDQNAgent:
     """
     def __init__(self, board_width, board_height,
                  alpha=0.001, gamma=0.95,
-                 eps_start=1.0, eps_min=0.01, eps_decay=0.995,
-                 memory_size=10_000, batch_size=128,
+                 eps_start=1.0, eps_min=0.1, eps_decay=0.995,
+                 memory_size=10_000, batch_size=64,
                  device=None):
 
         self.board_width, self.board_height = board_width, board_height
@@ -105,7 +105,7 @@ class ValueDQNAgent:
 
     # --- reward plug ---
     def compute_reward(self, info, done):
-        reward = 1 + info["lines_cleared"]**2 * self.board_width
+        reward = (10 / self.board_height) + info["lines_cleared"]**2 * self.board_width
         if done and info.get("game_over", True):
             reward -= 10
         return reward
@@ -236,7 +236,7 @@ class ValueDQNAgent:
             save_file)
 
     def load_agent(self, path):
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         if self.model is None:
             in_dim = checkpoint["input_dim"]
             self.model = ValueNet(in_dim).to(self.device)

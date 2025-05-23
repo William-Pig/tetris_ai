@@ -35,28 +35,64 @@ def tensorize_obs(obs):
 
 
 
+# class DQNCNN(nn.Module):
+#     def __init__(self, in_channels, n_actions):
+#         """
+#         CNN Architecture: convolution layers -> connected layers
+#         """
+#         super().__init__()
+#         self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=(1,3), padding=(0, 1))  # horizontal patterns
+#         self.conv2 = nn.Conv2d(32, 64, kernel_size=(3, 1), padding=(1, 0))  # vertical patterns
+#         self.gap = nn.AdaptiveAvgPool2d(1)   # -> [B,64,1,1]
+#         self.fc1 = nn.Linear(64, 128)  # 64 in_features
+#         self.fc2 = nn.Linear(128, n_actions)
+#         self.out = self.fc2
+
+#     def forward(self, x):
+#         """Propagates prediction forward in the NN"""
+#         x = x.float()  # ensure float32
+#         x = F.relu(self.conv1(x))
+#         x = F.relu(self.conv2(x))
+#         # x = F.relu(self.conv3(x))
+#         x = self.gap(x).view(x.size(0), -1)  # flatten, from convolution to 
+#         x = F.relu(self.fc1(x))
+#         return self.fc2(x)  # Q-values for all actions, (B, n_actions), B means batch size
+
 class DQNCNN(nn.Module):
-    def __init__(self, in_channels, n_actions):
-        """
-        CNN Architecture: convolution layers -> connected layers
-        """
+    def __init__(self, n_actions, board_h, board_w):
         super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=(1,3), padding=(0, 1))  # horizontal patterns
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=(3, 1), padding=(1, 0))  # vertical patterns
-        self.gap = nn.AdaptiveAvgPool2d(1)   # -> [B,64,1,1]
-        self.fc1 = nn.Linear(64, 128)  # 64 in_features
-        self.fc2 = nn.Linear(128, n_actions)
-        self.out = self.fc2
+
+        # Convolutional layers 
+        self.feat = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=5, padding=2),  # keep size
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2)                   # 20×10 → 10×5
+        )
+        # compute flattened size dynamically
+        with torch.no_grad():
+            dummy = torch.zeros(1, 1, board_h, board_w)
+            flat_dim = self.feat(dummy).view(1, -1).size(1)
+        flat_dim += 14  # one-hot encoding of current and next pieces
+        # fully connected head
+        self.fc1 = nn.Linear(flat_dim, 256)
+        self.fc2 = nn.Linear(256, 128)
+        self.out = nn.Linear(128, n_actions)
+
 
     def forward(self, x):
-        """Propagates prediction forward in the NN"""
-        x = x.float()  # ensure float32
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        # x = F.relu(self.conv3(x))
-        x = self.gap(x).view(x.size(0), -1)  # flatten, from convolution to 
+        x = x.float()  # (B,15,H,W)
+        board = x[:, :1]  # (B,1,H,W)
+        piece = x[:, 1:, 0, 0]  # (B,14)
+        conv = self.feat(board).view(x.size(0), -1)
+        x = torch.cat([conv, piece], dim=1)
         x = F.relu(self.fc1(x))
-        return self.fc2(x)  # Q-values for all actions, (B, n_actions), B means batch size
+        x = F.relu(self.fc2(x))
+        return self.out(x)
+
 
 
 class CNNAgent:
@@ -132,9 +168,16 @@ class CNNAgent:
         # Target Q-values, from frozen target model
         with torch.no_grad():
             # Single DQN
-            q_next = self.target_model(next_states)  # [B, num_actions], find all future q-values
-            q_next_max = q_next.max(dim=1)[0]  # [B], max Q-value for next state
-            q_target = rewards + self.gamma * q_next_max * (1 - dones)  # [B], if done target = rewards
+            # q_next = self.target_model(next_states)  # [B, num_actions], find all future q-values
+            # q_next_max = q_next.max(dim=1)[0]  # [B], max Q-value for next state
+            # q_target = rewards + self.gamma * q_next_max * (1 - dones)  # [B], if done target = rewards
+            # Double DQN
+            next_q_online  = self.model(next_states)
+            next_actions   = next_q_online.argmax(1, keepdim=True)
+            next_q_target  = self.target_model(next_states)
+            q_next_max     = next_q_target.gather(1, next_actions).squeeze(1)
+            q_target = rewards + self.gamma * q_next_max * (1 - dones)
+
 
         #  Loss and Backprop
         loss = F.mse_loss(q_pred, q_target)
@@ -153,8 +196,8 @@ class CNNAgent:
         n_actions = len(env.full_action_space)
 
         if self.model is None:
-            self.model = DQNCNN(state_shape[0], n_actions).to(self.device)
-            self.target_model = DQNCNN(state_shape[0], n_actions).to(self.device)  # forzen model
+            self.model = DQNCNN(n_actions, board_h=self.board_height, board_w=self.board_width).to(self.device)
+            self.target_model = DQNCNN(n_actions, board_h=self.board_height, board_w=self.board_width).to(self.device)  # forzen model
             self.target_model.load_state_dict(self.model.state_dict())  # sync model
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.alpha)
 
@@ -221,8 +264,8 @@ class CNNAgent:
         if self.model is None:
             c, _, _ = checkpoint["state_shape"]
             n_act = checkpoint["num_actions"]
-            self.model = DQNCNN(c, n_act).to(self.device)
-            self.target_model = DQNCNN(c, n_act).to(self.device)
+            self.model = DQNCNN(n_act, board_h=self.board_height, board_w=self.board_width).to(self.device)
+            self.target_model = DQNCNN(n_act, board_h=self.board_height, board_w=self.board_width).to(self.device)
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.alpha)
 
         self.model.load_state_dict(checkpoint["model"])

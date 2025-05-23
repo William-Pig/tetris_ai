@@ -32,7 +32,7 @@ class TabularQAgent:
 
     def compute_reward(self, info, done):
         """Reward function"""
-        reward = 1 + info["lines_cleared"]**2 * self.board_width
+        reward = (10 / self.board_height) + info["lines_cleared"]**2 * self.board_width
         if done and info.get("game_over", True):
             reward -= 10
         return reward
