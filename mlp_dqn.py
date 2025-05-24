@@ -252,3 +252,49 @@ class MLPAgent:
         # Save GIF
         env.save_gif(save_path)
         print(f"Saved gameplay GIF to: {save_path}")
+
+    def evaluate_agent(self, env, num_episodes=1000):
+        """
+        Evaluate the MLPAgent using a greedy policy (epsilon=0).
+
+        Returns:
+            tuple: (rewards, scores, survival_lengths)
+        """
+        rewards = []
+        scores = []
+        survival_lengths = []
+
+        original_eps = self.eps
+        self.eps = 0.0  # disable exploration
+
+        for _ in tqdm(range(num_episodes), desc="Evaluating"):
+            obs = env.reset()
+            state = self.parse_obs(obs).to(self.device)
+
+            total_reward = 0.0
+            done = False
+            steps = 0
+
+            while not done:
+                valid_action_ids = env.get_valid_action_ids()
+                if not valid_action_ids:
+                    break
+
+                self.model.eval()
+                with torch.no_grad():
+                    q_vals = self.model(state.unsqueeze(0).to(self.device)).squeeze(0)
+                action = max(valid_action_ids, key=lambda a: q_vals[a].item())
+
+                next_obs, _, done, info = env.step(action)
+                reward = self.compute_reward(info, done)
+                total_reward += reward
+
+                state = self.parse_obs(next_obs).to(self.device)
+                steps += 1
+
+            rewards.append(total_reward)
+            scores.append(env.game.score)
+            survival_lengths.append(steps)
+
+        self.eps = original_eps  # restore epsilon
+        return rewards, scores, survival_lengths

@@ -104,3 +104,45 @@ class TabularQAgent:
         self.eps = data["epsilon"]
         self.rewards = data["rewards"]
         self.score = data['scores']
+
+
+    # --- evaluation ---
+    def evaluate_agent(self, env, num_episodes=1000):
+        """Evaluate the trained agent with greedy policy (no exploration)."""
+        rewards = []
+        scores = []
+        survival_lengths = []
+
+        original_eps = self.eps  # Save current epsilon
+        self.eps = 0.0  # Disable exploration for evaluation
+
+        for _ in tqdm(range(num_episodes), desc="Evaluating"):
+            obs = env.reset()
+            state = self.parse_obs(obs)
+            key = self._key(state)
+
+            total_reward = 0.0
+            step_count = 0
+            done = False
+
+            while not done:
+                valid_actions = env.get_valid_action_ids()
+                if not valid_actions:
+                    break
+                action = max(valid_actions, key=lambda a: self.Q[key][a])  # greedy action
+
+                next_obs, _, done, info = env.step(action)
+                reward = self.compute_reward(info, done)
+                total_reward += reward
+
+                next_state = self.parse_obs(next_obs)
+                key = self._key(next_state)
+                step_count += 1
+
+            rewards.append(total_reward)
+            scores.append(env.game.score)
+            survival_lengths.append(step_count)
+
+        self.eps = original_eps  # Restore original epsilon
+        return rewards, scores, survival_lengths
+

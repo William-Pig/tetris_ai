@@ -277,3 +277,50 @@ class ValueDQNAgent:
         env.save_gif(save_path)
         print(f"Saved gameplay GIF to: {save_path}")
 
+
+    # --- evaluation ---
+    def evaluate_agent(self, env, num_episodes=1000):
+        """
+        Evaluate the ValueDQNAgent using a greedy policy (epsilon=0).
+
+        Returns:
+            tuple: (rewards, scores, survival_lengths)
+        """
+        rewards = []
+        scores = []
+        survival_lengths = []
+
+        original_eps = self.eps
+        self.eps = 0.0  # disable exploration
+
+        for _ in tqdm(range(num_episodes), desc="Evaluating"):
+            obs = env.reset()
+            state = board_props(env.game.board)
+
+            total_reward = 0.0
+            steps = 0
+            done = False
+
+            while not done:
+                successors = self._enumerate_successors(env)
+                if not successors:
+                    break
+
+                with torch.no_grad():
+                    states = torch.tensor(np.stack(list(successors.values())), dtype=torch.float32, device=self.device)
+                    values = self.model(states)
+                    best_id = list(successors.keys())[torch.argmax(values).item()]
+
+                _, _, done, info = env.step(best_id)
+                reward = self.compute_reward(info, done)
+                total_reward += reward
+
+                state = successors[best_id]
+                steps += 1
+
+            rewards.append(total_reward)
+            scores.append(env.game.score)
+            survival_lengths.append(steps)
+
+        self.eps = original_eps  # restore original epsilon
+        return rewards, scores, survival_lengths
