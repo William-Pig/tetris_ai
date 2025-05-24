@@ -64,11 +64,9 @@ class DQNCNN(nn.Module):
 
         # Convolutional layers 
         self.feat = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=5, padding=2),  # keep size
+            nn.Conv2d(1, 32, kernel_size=3, padding=1),  # padding to keep size
             nn.ReLU(inplace=True),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2)                   # 20×10 → 10×5
         )
@@ -78,9 +76,9 @@ class DQNCNN(nn.Module):
             flat_dim = self.feat(dummy).view(1, -1).size(1)
         flat_dim += 14  # one-hot encoding of current and next pieces
         # fully connected head
-        self.fc1 = nn.Linear(flat_dim, 256)
-        self.fc2 = nn.Linear(256, 128)
-        self.out = nn.Linear(128, n_actions)
+        self.fc1 = nn.Linear(flat_dim, 128)
+        self.fc2 = nn.Linear(128, 64)
+        self.out = nn.Linear(64, n_actions)
 
 
     def forward(self, x):
