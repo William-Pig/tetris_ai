@@ -1,6 +1,6 @@
 # tetris_ai
 
-A reinforcement learning application on Tetris (update may 12 2025).
+A reinforcement learning application on Tetris (updated May 27 2025).
 
 ## Files
 
